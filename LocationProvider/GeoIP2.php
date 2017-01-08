@@ -2,10 +2,13 @@
 /**
  * Piwik GeoIP2 Location Provider plugin
  *
+ * @link    https://github.com/grzchr15/piwik-geoip2-andintra
+ * Based on:
  * @link    https://github.com/diabl0/piwik-geoip2
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  * @author  Krzysztof Szatanik <chris.szatanik@gmail.com>
+ * @author  Christian Bretterhofer <christian.bretterhofergmail.com>
  *
  */
 namespace Piwik\Plugins\GeoIP2\LocationProvider;
@@ -124,7 +127,14 @@ class GeoIp2 extends LocationProvider
             'order'         => 2,
         ];
     }
-
+		
+		
+		
+		public function getDataFilePath() {
+			
+				return __DIR__ . '/' . 'IntranetGeoIP.data.php';
+        //return __DIR__ . '/../../../misc/' . 'IntranetGeoIP.data.php';
+    }
     /**
      * Uses a GeoIP database to get a visitor's location based on their IP address.
      *
@@ -141,57 +151,82 @@ class GeoIp2 extends LocationProvider
     public function getLocation($info)
     {
         $ip = $this->getIpFromInfo($info);
-//        $ip = '89.71.172.123';
-
+/*
+        $ip = '89.71.172.123';
+				$ip = '2001:db8:1234:1000::1000';
+				$ip = '172.16.22.4'
+				$ip = '2001:db8:5678:4000::10',
+				$ip = '172.16.23.5'
+*/
         $result = [];
-        $reader = $this->getReader();
+        
+        $ip_bin = \Piwik\Network\IP::fromStringIP($info['ip']);
 
-        try {
-            switch ($reader->metadata()->databaseType) {
-                case 'GeoLite2-Country':
-                case 'GeoIP2-Country':
-                    $lookupResult                     = $reader->country($ip);
-                    $result[self::CONTINENT_NAME_KEY] = $lookupResult->continent->name;
-                    $result[self::CONTINENT_CODE_KEY] = strtoupper($lookupResult->continent->code);
-                    $result[self::COUNTRY_CODE_KEY]   = strtoupper($lookupResult->country->isoCode);
-                    $result[self::COUNTRY_NAME_KEY]   = $lookupResult->country->name;
-                    break;
-                case 'GeoLite2-City':
-                case 'GeoIP2-City':
-                    $lookupResult                     = $reader->city($ip);
-                    $result[self::CONTINENT_NAME_KEY] = $lookupResult->continent->name;
-                    $result[self::CONTINENT_CODE_KEY] = strtoupper($lookupResult->continent->code);
-                    $result[self::COUNTRY_CODE_KEY]   = strtoupper($lookupResult->country->isoCode);
-                    $result[self::COUNTRY_NAME_KEY]   = $lookupResult->country->name;
-                    $result[self::CITY_NAME_KEY]      = $lookupResult->city->name;
-                    $result[self::LATITUDE_KEY]       = $lookupResult->location->latitude;
-                    $result[self::LONGITUDE_KEY]      = $lookupResult->location->longitude;
-                    $result[self::POSTAL_CODE_KEY]    = $lookupResult->postal->code;
-                    $regions                          = $lookupResult->subdivisions;
-                    if (isset($regions[0])) {
-                        switch ($result[self::COUNTRY_CODE_KEY]) {
-                            case 'US':
-                            case 'CA':
-                                $result[self::REGION_CODE_KEY] = strtoupper($lookupResult->subdivisions[0]->isoCode);
-                                break;
-                            default:
-                                $result[self::REGION_CODE_KEY] = strtoupper(
-                                    $this->isoRegionCodeToFIPS(
-                                        $result[self::COUNTRY_CODE_KEY],
-                                        $lookupResult->subdivisions[0]->isoCode
-                                    )
-                                );
-                                break;
-                        }
-                        $result[self::REGION_NAME_KEY] = $lookupResult->subdivisions[0]->name;
+        $data = include $this->getDataFilePath();
+
+        $ipam_location = 0;
+        foreach ($data as $value) {
+            if (isset($value['networks'])) {
+                if ($ip_bin->isInRanges($value['networks']) === true) {
+                    // values with the same key are not overwritten by right!
+                    // http://www.php.net/manual/en/language.operators.array.php
+                    if (isset($value['visitorInfo'])) {
+                        $result = $value['visitorInfo'];
+                        $ipam_location = 1;
                     }
                     break;
+                }
             }
-        } catch (AddressNotFoundException $e) {
-            // ignore - do nothing
         }
+//Search at MAXMIND if not found in IPAM
+        if ($ipam_location === 0) {
+		        $reader = $this->getReader();
+		        try {
+		            switch ($reader->metadata()->databaseType) {
+		                case 'GeoLite2-Country':
+		                case 'GeoIP2-Country':
+		                    $lookupResult                     = $reader->country($ip);
+		                    $result[self::CONTINENT_NAME_KEY] = $lookupResult->continent->name;
+		                    $result[self::CONTINENT_CODE_KEY] = strtoupper($lookupResult->continent->code);
+		                    $result[self::COUNTRY_CODE_KEY]   = strtoupper($lookupResult->country->isoCode);
+		                    $result[self::COUNTRY_NAME_KEY]   = $lookupResult->country->name;
+		                    break;
+		                case 'GeoLite2-City':
+		                case 'GeoIP2-City':
+		                    $lookupResult                     = $reader->city($ip);
+		                    $result[self::CONTINENT_NAME_KEY] = $lookupResult->continent->name;
+		                    $result[self::CONTINENT_CODE_KEY] = strtoupper($lookupResult->continent->code);
+		                    $result[self::COUNTRY_CODE_KEY]   = strtoupper($lookupResult->country->isoCode);
+		                    $result[self::COUNTRY_NAME_KEY]   = $lookupResult->country->name;
+		                    $result[self::CITY_NAME_KEY]      = $lookupResult->city->name;
+		                    $result[self::LATITUDE_KEY]       = $lookupResult->location->latitude;
+		                    $result[self::LONGITUDE_KEY]      = $lookupResult->location->longitude;
+		                    $result[self::POSTAL_CODE_KEY]    = $lookupResult->postal->code;
+		                    $regions                          = $lookupResult->subdivisions;
+		                    if (isset($regions[0])) {
+		                        switch ($result[self::COUNTRY_CODE_KEY]) {
+		                            case 'US':
+		                            case 'CA':
+		                                $result[self::REGION_CODE_KEY] = strtoupper($lookupResult->subdivisions[0]->isoCode);
+		                                break;
+		                            default:
+		                                $result[self::REGION_CODE_KEY] = strtoupper(
+		                                    $this->isoRegionCodeToFIPS(
+		                                        $result[self::COUNTRY_CODE_KEY],
+		                                        $lookupResult->subdivisions[0]->isoCode
+		                                    )
+		                                );
+		                                break;
+		                        }
+		                        $result[self::REGION_NAME_KEY] = $lookupResult->subdivisions[0]->name;
+		                    }
+		                    break;
+		            }
+		        } catch (AddressNotFoundException $e) {
+		            // ignore - do nothing
+		        }
 
-
+				}
         $this->completeLocationResult($result);
 
         return $result;
